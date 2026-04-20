@@ -8,7 +8,6 @@ void main() {
 
 class MyApp extends StatefulWidget {
   const MyApp({super.key});
-
   @override
   State<MyApp> createState() => _MyAppState();
 }
@@ -41,13 +40,45 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
-  List<Map<String, String>> myBookings = [];
+  List<Map<String, String>> myBookings = [];   // 使用 String 類型，避免類型錯誤
   DateTime selectedDate = DateTime(2026, 4, 1);
+
+  final Map<String, int> remainingSpots = {};
+  final int maxStudents = 12;
 
   @override
   void initState() {
     super.initState();
+    _initSpots();
     _loadBookings();
+  }
+
+  void _initSpots() {
+    remainingSpots.clear();
+    for (int i = 0; i < 30; i++) {
+      final date = DateTime(2026, 4, 1).add(Duration(days: i));
+      final dateStr = DateFormat('yyyy-MM-dd').format(date);
+      for (var dayClasses in weeklySchedule.values) {
+        for (var cls in dayClasses) {
+          for (String time in ['18:00 - 19:30', '19:30 - 21:00', '21:00 - 22:30']) {
+            final key = "$dateStr|$time|${cls['tutor']}";
+            remainingSpots[key] = maxStudents;
+          }
+        }
+      }
+    }
+  }
+
+  Map<int, List<Map<String, String>>> get weeklySchedule {
+    return {
+      1: [{'style': 'Jazz Funk', 'tutor': 'Sumyi'}, {'style': 'Heels', 'tutor': 'Jay'}, {'style': 'Choreography', 'tutor': 'Cat'}],
+      2: [{'style': 'Hip Hop', 'tutor': 'Haylie'}, {'style': 'Jazz Funk', 'tutor': 'Sumyi'}, {'style': 'Girls Hip Hop', 'tutor': 'Eunis'}],
+      3: [{'style': 'Heels', 'tutor': 'Jay'}, {'style': 'Choreography', 'tutor': 'Cat'}, {'style': 'Hip Hop', 'tutor': 'Haylie'}],
+      4: [{'style': 'Jazz Funk', 'tutor': 'Sumyi'}, {'style': 'Girls Hip Hop', 'tutor': 'Eunis'}, {'style': 'Heels', 'tutor': 'Jay'}],
+      5: [{'style': 'Choreography', 'tutor': 'Cat'}, {'style': 'Hip Hop', 'tutor': 'Haylie'}, {'style': 'Jazz Funk', 'tutor': 'Sumyi'}],
+      6: [{'style': 'Girls Hip Hop', 'tutor': 'Eunis'}, {'style': 'Choreography', 'tutor': 'Cat'}, {'style': 'Heels', 'tutor': 'Jay'}],
+      7: [{'style': 'Hip Hop', 'tutor': 'Haylie'}, {'style': 'Girls Hip Hop', 'tutor': 'Eunis'}, {'style': 'Choreography', 'tutor': 'Cat'}],
+    };
   }
 
   Future<void> _loadBookings() async {
@@ -56,26 +87,73 @@ class _MainScreenState extends State<MainScreen> {
     setState(() {
       myBookings = saved.map((e) {
         final parts = e.split('|');
-        return {'class': parts[0], 'time': parts[1], 'tutor': parts[2]};
+        return {
+          'class': parts[0],
+          'time': parts[1],
+          'tutor': parts[2],
+          'date': parts.length > 3 ? parts[3] : '',
+        };
       }).toList();
     });
   }
 
   Future<void> _saveBookings() async {
     final prefs = await SharedPreferences.getInstance();
-    final list = myBookings.map((b) => '${b['class']}|${b['time']}|${b['tutor']}').toList();
+    final list = myBookings.map((b) => 
+      '${b['class']}|${b['time']}|${b['tutor']}|${b['date']}'
+    ).toList();
     await prefs.setStringList('bookings', list);
   }
 
+  bool canBook(String dateStr, String time, String tutor) {
+    final key = "$dateStr|$time|$tutor";
+    if ((remainingSpots[key] ?? maxStudents) <= 0) return false;
+    return !myBookings.any((b) => 
+      b['date'] == dateStr && b['time'] == time && b['tutor'] == tutor
+    );
+  }
+
   void bookClass(String className, String time, String tutor) {
+    final dateStr = DateFormat('yyyy-MM-dd').format(selectedDate);
+    final key = "$dateStr|$time|$tutor";
+
+    if (!canBook(dateStr, time, tutor)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(widget.isEnglish ? 'You have already booked this class or it is full!' : '你已經預約過這堂課或已額滿！'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     setState(() {
-      myBookings.add({'class': className, 'time': time, 'tutor': tutor});
+      remainingSpots[key] = (remainingSpots[key] ?? maxStudents) - 1;
+      myBookings.add({
+        'class': className,
+        'time': time,
+        'tutor': tutor,
+        'date': dateStr,
+      });
     });
     _saveBookings();
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(widget.isEnglish ? 'Booked successfully! 🎉' : '預約成功！🎉')),
+    );
   }
 
   void cancelBooking(int index) {
-    setState(() => myBookings.removeAt(index));
+    final booking = myBookings[index];
+    final dateStr = booking['date'] ?? '';
+    final time = booking['time']!;
+    final tutor = booking['tutor']!;
+    final key = "$dateStr|$time|$tutor";
+
+    setState(() {
+      remainingSpots[key] = (remainingSpots[key] ?? maxStudents) + 1;
+      myBookings.removeAt(index);
+    });
     _saveBookings();
   }
 
@@ -88,6 +166,8 @@ class _MainScreenState extends State<MainScreen> {
         selectedDate: selectedDate,
         onDateChanged: (newDate) => setState(() => selectedDate = newDate),
         onBook: bookClass,
+        remainingSpots: remainingSpots,
+        canBook: canBook,
       ),
       MyBookingsPage(
         isEnglish: widget.isEnglish,
@@ -104,8 +184,7 @@ class _MainScreenState extends State<MainScreen> {
         actions: [
           TextButton(
             onPressed: widget.toggleLanguage,
-            child: Text(widget.isEnglish ? '中文' : 'English',
-                style: const TextStyle(color: Colors.white, fontSize: 18)),
+            child: Text(widget.isEnglish ? '中文' : 'English', style: const TextStyle(color: Colors.white, fontSize: 18)),
           ),
         ],
       ),
@@ -128,7 +207,6 @@ class _MainScreenState extends State<MainScreen> {
 class HomePage extends StatelessWidget {
   final bool isEnglish;
   const HomePage({super.key, required this.isEnglish});
-
   @override
   Widget build(BuildContext context) {
     return Center(
@@ -144,12 +222,6 @@ class HomePage extends StatelessWidget {
               style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 15),
-            Text(
-              isEnglish ? 'Book your favorite dance classes easily' : '輕鬆預約你鍾意的舞蹈課堂',
-              style: const TextStyle(fontSize: 18),
-              textAlign: TextAlign.center,
-            ),
           ],
         ),
       ),
@@ -163,6 +235,8 @@ class ClassesPage extends StatelessWidget {
   final DateTime selectedDate;
   final Function(DateTime) onDateChanged;
   final Function(String, String, String) onBook;
+  final Map<String, int> remainingSpots;
+  final Function(String, String, String) canBook;
 
   const ClassesPage({
     super.key,
@@ -170,59 +244,17 @@ class ClassesPage extends StatelessWidget {
     required this.selectedDate,
     required this.onDateChanged,
     required this.onBook,
+    required this.remainingSpots,
+    required this.canBook,
   });
 
-  // 每個星期幾 對應 不同老師 & 課程
-  Map<int, List<Map<String, String>>> get weeklySchedule {
-    return {
-      1: [ // Mon
-        {'style': 'Jazz Funk', 'tutor': 'Sumyi'},
-        {'style': 'Heels', 'tutor': 'Jay'},
-        {'style': 'Choreography', 'tutor': 'Cat'},
-      ],
-      2: [ // Tue
-        {'style': 'Hip Hop', 'tutor': 'Haylie'},
-        {'style': 'Jazz Funk', 'tutor': 'Sumyi'},
-        {'style': 'Girls Hip Hop', 'tutor': 'Eunis'},
-      ],
-      3: [ // Wed
-        {'style': 'Heels', 'tutor': 'Jay'},
-        {'style': 'Choreography', 'tutor': 'Cat'},
-        {'style': 'Hip Hop', 'tutor': 'Haylie'},
-      ],
-      4: [ // Thu
-        {'style': 'Jazz Funk', 'tutor': 'Sumyi'},
-        {'style': 'Girls Hip Hop', 'tutor': 'Eunis'},
-        {'style': 'Heels', 'tutor': 'Jay'},
-      ],
-      5: [ // Fri
-        {'style': 'Choreography', 'tutor': 'Cat'},
-        {'style': 'Hip Hop', 'tutor': 'Haylie'},
-        {'style': 'Jazz Funk', 'tutor': 'Sumyi'},
-      ],
-      6: [ // Sat
-        {'style': 'Girls Hip Hop', 'tutor': 'Eunis'},
-        {'style': 'Choreography', 'tutor': 'Cat'},
-        {'style': 'Heels', 'tutor': 'Jay'},
-      ],
-      7: [ // Sun
-        {'style': 'Hip Hop', 'tutor': 'Haylie'},
-        {'style': 'Girls Hip Hop', 'tutor': 'Eunis'},
-        {'style': 'Choreography', 'tutor': 'Cat'},
-      ],
-    };
-  }
-
-  final List<String> timeSlots = const [
-    '18:00 - 19:30',
-    '19:30 - 21:00',
-    '21:00 - 22:30',
-  ];
+  final List<String> timeSlots = const ['18:00 - 19:30', '19:30 - 21:00', '21:00 - 22:30'];
 
   @override
   Widget build(BuildContext context) {
-    int weekday = selectedDate.weekday; // 1=Mon, 7=Sun
-    final classesToday = weeklySchedule[weekday] ?? [];
+    final weekday = selectedDate.weekday;
+    final classesToday = _MainScreenState().weeklySchedule[weekday] ?? [];
+    final dateStr = DateFormat('yyyy-MM-dd').format(selectedDate);
 
     return Column(
       children: [
@@ -247,21 +279,8 @@ class ClassesPage extends StatelessWidget {
                     ),
                     child: Column(
                       children: [
-                        Text(
-                          DateFormat('MM/dd').format(date),
-                          style: TextStyle(
-                            color: isSelected ? Colors.white : Colors.black,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                          ),
-                        ),
-                        Text(
-                          DateFormat('E').format(date),
-                          style: TextStyle(
-                            color: isSelected ? Colors.white : Colors.grey,
-                            fontSize: 12,
-                          ),
-                        ),
+                        Text(DateFormat('MM/dd').format(date), style: TextStyle(color: isSelected ? Colors.white : Colors.black, fontWeight: FontWeight.bold)),
+                        Text(DateFormat('E').format(date), style: TextStyle(color: isSelected ? Colors.white : Colors.grey, fontSize: 12)),
                       ],
                     ),
                   ),
@@ -277,8 +296,13 @@ class ClassesPage extends StatelessWidget {
             itemCount: classesToday.length,
             itemBuilder: (context, slotIndex) {
               final time = timeSlots[slotIndex];
-              final className = '${classesToday[slotIndex]['style']} by ${classesToday[slotIndex]['tutor']}';
+              final style = classesToday[slotIndex]['style']!;
               final tutor = classesToday[slotIndex]['tutor']!;
+              final className = '$style by $tutor';
+
+              final key = "$dateStr|$time|$tutor";
+              final spotsLeft = remainingSpots[key] ?? 12;
+              final isFull = spotsLeft <= 0;
 
               return Card(
                 margin: const EdgeInsets.only(bottom: 12),
@@ -287,43 +311,30 @@ class ClassesPage extends StatelessWidget {
                   leading: Container(
                     width: 80,
                     height: 80,
-                    decoration: BoxDecoration(
-                      color: Colors.deepPurple.shade100,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+                    decoration: BoxDecoration(color: Colors.deepPurple.shade100, borderRadius: BorderRadius.circular(12)),
                     child: const Icon(Icons.music_note, size: 40, color: Colors.deepPurple),
                   ),
-                  title: Text(
-                    className,
-                    style: const TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
-                  ),
+                  title: Text(className, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.bold)),
                   subtitle: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const SizedBox(height: 6),
                       Text(time, style: const TextStyle(fontSize: 17)),
                       Text(isEnglish ? '1.5 hours' : '1.5 小時'),
+                      const SizedBox(height: 4),
+                      Text(
+                        isFull ? (isEnglish ? 'Sold Out' : '已額滿') : (isEnglish ? '$spotsLeft spots left' : '剩餘 $spotsLeft 個名額'),
+                        style: TextStyle(color: isFull ? Colors.red : Colors.green, fontWeight: FontWeight.bold),
+                      ),
                     ],
                   ),
-                  trailing: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.deepPurple,
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-                    ),
-                    // 按鈕文字變白色 → 看得清楚
-                    child: Text(
-                      isEnglish ? 'Book' : '預約',
-                      style: const TextStyle(color: Colors.white, fontSize: 16),
-                    ),
-                    onPressed: () {
-                      onBook(className, time, tutor);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(isEnglish ? 'Booked successfully! 🎉' : '預約成功！🎉'),
-                        ),
-                      );
-                    },
-                  ),
+                  trailing: isFull 
+                    ? const Text('已額滿', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold))
+                    : ElevatedButton(
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple),
+                        child: Text(isEnglish ? 'Book' : '預約', style: const TextStyle(color: Colors.white)),
+                        onPressed: () => onBook(className, time, tutor),
+                      ),
                 ),
               );
             },
@@ -337,7 +348,7 @@ class ClassesPage extends StatelessWidget {
 // ==================== 我的預約 ====================
 class MyBookingsPage extends StatelessWidget {
   final bool isEnglish;
-  final List<Map<String, String>> bookings;
+  final List<Map<String, dynamic>> bookings;
   final Function(int) onCancel;
 
   const MyBookingsPage({
@@ -366,8 +377,8 @@ class MyBookingsPage extends StatelessWidget {
         final b = bookings[index];
         return Card(
           child: ListTile(
-            title: Text(b['class']!),
-            subtitle: Text('${b['time']!} • ${b['tutor']!}'),
+            title: Text(b['class'] ?? ''),
+            subtitle: Text('${b['date']} • ${b['time']} • ${b['tutor']}'),
             trailing: IconButton(
               icon: const Icon(Icons.delete, color: Colors.red),
               onPressed: () => onCancel(index),
